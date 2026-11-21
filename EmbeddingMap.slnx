@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/EmbeddingMap.Core/EmbeddingMap.Core.csproj" />
+    <Project Path="src/EmbeddingMap.Web/EmbeddingMap.Web.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/EmbeddingMap.Core.Tests/EmbeddingMap.Core.Tests.csproj" />
+  </Folder>
+  <Folder Name="/tools/">
+    <Project Path="tools/EmbeddingMap.Generator/EmbeddingMap.Generator.csproj" />
+  </Folder>
+</Solution>
