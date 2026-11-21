@@ -1,0 +1,248 @@
+﻿@page "/"
+@using System.Globalization
+@using System.Net.Http.Json
+@using EmbeddingMap.Core
+@inject HttpClient Http
+
+<PageTitle>Embedding map</PageTitle>
+
+<h1>Embedding map</h1>
+<p class="intro">
+    A language model can turn any text into a list of numbers called an embedding. Texts with similar meanings get
+    similar numbers, so they land close together on this map. Hover over a point to read it and click it to see the
+    texts closest in meaning.
+</p>
+
+@if (error is not null)
+{
+    <p class="error">@error</p>
+}
+else if (index is null || set is null || map is null)
+{
+    <p>Loading…</p>
+}
+else
+{
+    <div class="sets">
+        <span>Pick a set:</span>
+        @foreach (var summary in index.Sets)
+        {
+            <button type="button" class="@(summary.Id == set.Id ? "active" : "")" @onclick="() => LoadSet(summary.Id)">
+                @summary.Name
+            </button>
+        }
+    </div>
+    <p class="set-description">@set.Description (@set.Items.Count texts)</p>
+
+    <div class="layout">
+        <div class="map-column">
+            <ul class="legend">
+                @foreach (var group in groups)
+                {
+                    <li><span class="swatch" style="background: @ColorOfGroup(group)"></span>@group</li>
+                }
+            </ul>
+            <MapView @ref="mapView" Items="set.Items" Points="map" ColorOf="ColorOf" Selected="selected"
+                     Linked="Linked" Opacity="Opacity" OnSelect="Select" />
+            <p class="hint">Scroll or use the buttons to zoom. Drag to move around.</p>
+        </div>
+
+        <aside class="panel">
+            <div class="modes" role="tablist">
+                <button type="button" role="tab" aria-selected="@(!searching)" class="@(!searching ? "active" : "")"
+                        @onclick="() => searching = false">Explore</button>
+                <button type="button" role="tab" aria-selected="@searching" class="@(searching ? "active" : "")"
+                        @onclick="StartSearch">Search by meaning</button>
+            </div>
+
+            @if (searching)
+            {
+                <label class="query">
+                    Find the texts closest in meaning to
+                    <select @bind="QueryText">
+                        @foreach (var group in groups)
+                        {
+                            <optgroup label="@group">
+                                @foreach (var item in set.Items.Where(item => item.Group == group))
+                                {
+                                    <option value="@item.Text">@item.Text</option>
+                                }
+                            </optgroup>
+                        }
+                    </select>
+                </label>
+                <ol class="results">
+                    @foreach (var match in ranked)
+                    {
+                        <MatchRow Item="set.Items[match.Index]" Similarity="match.Similarity" Color="@ColorOf(match.Index)" />
+                    }
+                </ol>
+            }
+            else if (selected is int current)
+            {
+                <p class="selected-text">
+                    <span class="swatch" style="background: @ColorOf(current)"></span>
+                    <strong>@set.Items[current].Text</strong>
+                </p>
+                <p class="panel-title">The 5 texts closest in meaning</p>
+                <ol class="results">
+                    @foreach (var match in ranked.Take(NeighborCount))
+                    {
+                        <MatchRow Item="set.Items[match.Index]" Similarity="match.Similarity" Color="@ColorOf(match.Index)"
+                                  OnClick="() => Select(match.Index)" />
+                    }
+                </ol>
+            }
+            else
+            {
+                <p class="panel-empty">Click a point on the map to see the texts closest in meaning.</p>
+            }
+
+            <p class="panel-note">
+                Similarity goes from 0 to 1 and is computed on all @index.Dimensions numbers, not on the map.
+            </p>
+        </aside>
+    </div>
+
+    <section class="explain">
+        <h2>How this works</h2>
+        <h3>What is an embedding?</h3>
+        <p>
+            A model reads a text and returns a fixed list of numbers that describes its meaning. Here every text, from a
+            single word to a full sentence, becomes @index.Dimensions numbers. Texts that mean similar things get similar
+            numbers, even in different languages. This is how search by meaning works, and how an assistant finds the
+            right documents before answering (what is called RAG).
+        </p>
+        <h3>How is similarity measured?</h3>
+        <p>
+            By the angle between two lists of numbers, known as cosine similarity. A value of 1 means they point the same
+            way. With this model even texts on unrelated topics usually score between 0.7 and 0.85, so the order of the
+            results tells you more than the number itself.
+        </p>
+        <h3>Why the map is only a sketch</h3>
+        <p>
+            @index.Dimensions numbers cannot be drawn, so the page squeezes them into two with principal component
+            analysis (PCA). It keeps the two directions in which the texts differ the most and drops the rest. For this
+            set the map keeps @Percent(explainedVariance) of the variation. Two points can look close on the map and
+            still be far apart in @index.Dimensions dimensions. That is why the list of closest texts uses all the
+            numbers: trust the list over the map.
+        </p>
+        <h3>Where do the numbers come from?</h3>
+        <p>
+            They were computed once, ahead of time, with the open model
+            <a href="@index.ModelUrl">@index.Model</a> run through ONNX Runtime in .NET. The page only loads them. The
+            map and the similarities are computed in your browser, in C#. A different model would give different
+            numbers and a different map.
+        </p>
+    </section>
+}
+
+<footer>
+    Based on the lesson
+    <a href="https://github.com/rohitg00/ai-engineering-from-scratch/tree/main/phases/05-nlp-foundations-to-advanced/22-embedding-models-deep-dive">Embedding models</a>
+    of the course <a href="https://github.com/rohitg00/ai-engineering-from-scratch">AI Engineering from Scratch</a> (MIT).
+    Embeddings by <a href="https://huggingface.co/intfloat/multilingual-e5-small">multilingual-e5-small</a> (MIT).
+    Built with Blazor WebAssembly.
+</footer>
+
+@code {
+    private const int NeighborCount = 5;
+
+    // Colors that stay distinct for most kinds of color blindness (Okabe and Ito).
+    private static readonly string[] Palette = ["#0072B2", "#E69F00", "#009E73", "#CC79A7", "#56B4E9", "#D55E00"];
+
+    private readonly Dictionary<string, EmbeddingSet> cache = [];
+    private SetIndex? index;
+    private EmbeddingSet? set;
+    private float[][] vectors = [];
+    private List<string> groups = [];
+    private IReadOnlyList<Point2D>? map;
+    private double explainedVariance;
+    private MapView? mapView;
+    private string? error;
+
+    private int? selected;
+    private bool searching;
+    private IReadOnlyList<Match> ranked = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            index = await Http.GetFromJsonAsync("data/index.json", EmbeddingJsonContext.Default.SetIndex);
+            await LoadSet(index!.Sets[0].Id);
+        }
+        catch (HttpRequestException)
+        {
+            error = "The data could not be loaded. Try reloading the page.";
+        }
+    }
+
+    private async Task LoadSet(string id)
+    {
+        if (!cache.TryGetValue(id, out var loaded))
+        {
+            loaded = (await Http.GetFromJsonAsync($"data/{id}.json", EmbeddingJsonContext.Default.EmbeddingSet))!;
+            cache[id] = loaded;
+        }
+
+        set = loaded;
+        vectors = [.. set.Items.Select(item => item.Vector)];
+        groups = [.. set.Items.Select(item => item.Group).Distinct()];
+
+        var pca = Pca.To2D(vectors);
+        map = MapLayout.Fit(pca.Points, MapView.Width, MapView.Height, 40);
+        explainedVariance = pca.ExplainedVariance;
+
+        selected = null;
+        ranked = [];
+        if (searching)
+        {
+            Select(0);
+        }
+
+        mapView?.Reset();
+    }
+
+    private void Select(int index)
+    {
+        selected = index;
+        ranked = Neighbors.Rank(vectors, index);
+    }
+
+    private void StartSearch()
+    {
+        searching = true;
+        if (selected is null)
+        {
+            Select(0);
+        }
+    }
+
+    private string QueryText
+    {
+        get => selected is int current ? set!.Items[current].Text : "";
+        set => Select(this.set!.Items.ToList().FindIndex(item => item.Text == value));
+    }
+
+    // Explore joins the selected text to its 5 nearest. Search labels the 5 best matches too.
+    private IReadOnlyList<int> Linked => [.. ranked.Take(NeighborCount).Select(match => match.Index)];
+
+    // In search mode the weaker a match, the fainter its point.
+    private double Opacity(int i)
+    {
+        if (!searching || selected is null || i == selected)
+        {
+            return 1;
+        }
+
+        var rank = ranked.ToList().FindIndex(match => match.Index == i);
+        return 1 - (0.85 * rank / Math.Max(ranked.Count - 1, 1));
+    }
+
+    private string ColorOf(int i) => ColorOfGroup(set!.Items[i].Group);
+
+    private string ColorOfGroup(string group) => Palette[groups.IndexOf(group) % Palette.Length];
+
+    private static string Percent(double value) => value.ToString("0%", CultureInfo.InvariantCulture);
+}

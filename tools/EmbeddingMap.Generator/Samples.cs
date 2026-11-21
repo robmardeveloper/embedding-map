@@ -44,7 +44,7 @@ internal static class Samples
             ]),
         ]),
 
-        new("languages", "Spanish and English", "The same words in both languages. Most of them sit right next to their translation, even when the two words look nothing alike.",
+        new("languages", "Spanish and English", "The same words in both languages. On the map the two languages drift apart, because that is the biggest difference the map can show. Now click a word: most of the time the closest text is its translation.",
         [
             ("English",
             [

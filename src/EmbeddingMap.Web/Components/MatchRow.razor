@@ -1,0 +1,35 @@
+@using System.Globalization
+@using EmbeddingMap.Core
+
+<li class="match">
+    @if (OnClick.HasDelegate)
+    {
+        <button type="button" class="match-text" @onclick="OnClick">
+            <span class="swatch" style="background: @Color"></span>@Item.Text
+        </button>
+    }
+    else
+    {
+        <span class="match-text"><span class="swatch" style="background: @Color"></span>@Item.Text</span>
+    }
+    <span class="bar" title="Similarity @Value"><span style="width: @Width"></span></span>
+    <span class="score">@Value</span>
+</li>
+
+@code {
+    [Parameter, EditorRequired]
+    public required EmbeddedText Item { get; set; }
+
+    [Parameter]
+    public double Similarity { get; set; }
+
+    [Parameter, EditorRequired]
+    public required string Color { get; set; }
+
+    [Parameter]
+    public EventCallback OnClick { get; set; }
+
+    private string Value => Similarity.ToString("0.00", CultureInfo.InvariantCulture);
+
+    private string Width => Math.Clamp(Similarity, 0, 1).ToString("0.###%", CultureInfo.InvariantCulture);
+}

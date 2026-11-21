@@ -1,0 +1,198 @@
+@using System.Globalization
+@using EmbeddingMap.Core
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+
+<div class="map-frame">
+    <div class="map-tools">
+        <button type="button" title="Zoom in" @onclick="() => ZoomAt(Width / 2, Height / 2, ZoomStep)">+</button>
+        <button type="button" title="Zoom out" @onclick="() => ZoomAt(Width / 2, Height / 2, 1 / ZoomStep)">−</button>
+        <button type="button" title="Show the whole map" @onclick="Reset">Reset</button>
+    </div>
+
+    <svg @ref="svg" class="map @(dragging ? "dragging" : "")" viewBox="0 0 @Width @Height" role="img"
+         aria-label="Map of the texts. Similar meanings are close together."
+         @onwheel="OnWheel" @onwheel:preventDefault="true"
+         @onpointerdown="OnPointerDown" @onpointermove="OnPointerMove" @onpointerup="EndDrag" @onpointerleave="EndDrag">
+        <g transform="translate(@F(offsetX) @F(offsetY)) scale(@F(scale))">
+            @if (Selected is int from)
+            {
+                @foreach (var to in Linked)
+                {
+                    <line class="link" x1="@F(Points[from].X)" y1="@F(Points[from].Y)" x2="@F(Points[to].X)" y2="@F(Points[to].Y)" />
+                }
+            }
+
+            @for (var i = 0; i < Points.Count; i++)
+            {
+                var index = i;
+                var point = Points[i];
+                <circle class="point @(index == Selected ? "selected" : "")" cx="@F(point.X)" cy="@F(point.Y)"
+                        r="@F((index == Selected ? 8 : 6) / scale)" fill="@ColorOf(index)" opacity="@F(Opacity(index))"
+                        @onmouseover="() => hovered = index" @onmouseout="() => hovered = null"
+                        @onclick="() => Click(index)" />
+            }
+
+            @foreach (var index in LabelIndexes())
+            {
+                <SvgLabel @key="index" Text="@Items[index].Text" CssClass="@(index == hovered ? "label hovered" : "label")"
+                          X="Points[index].X + (10 / scale)" Y="Points[index].Y + (4 / scale)"
+                          FontSize="13 / scale" StrokeWidth="4 / scale" />
+            }
+        </g>
+    </svg>
+</div>
+
+@code {
+    public const double Width = 1000;
+    public const double Height = 700;
+    private const double ZoomStep = 1.4;
+
+    [Parameter, EditorRequired]
+    public required IReadOnlyList<EmbeddedText> Items { get; set; }
+
+    /// <summary>Where each text goes, already fitted to <see cref="Width"/> by <see cref="Height"/>.</summary>
+    [Parameter, EditorRequired]
+    public required IReadOnlyList<Point2D> Points { get; set; }
+
+    [Parameter, EditorRequired]
+    public required Func<int, string> ColorOf { get; set; }
+
+    [Parameter]
+    public int? Selected { get; set; }
+
+    /// <summary>Texts joined to the selected one by a line, with their label shown.</summary>
+    [Parameter]
+    public IReadOnlyList<int> Linked { get; set; } = [];
+
+    /// <summary>How visible each point is, from 0 to 1. Used to fade the weaker matches in search mode.</summary>
+    [Parameter]
+    public Func<int, double> Opacity { get; set; } = _ => 1;
+
+    [Parameter]
+    public EventCallback<int> OnSelect { get; set; }
+
+    private ElementReference svg;
+    private IJSObjectReference? module;
+    private double scale = 1, offsetX, offsetY;
+    private int? hovered;
+
+    private bool dragging;
+    private bool moved;
+    private double lastX, lastY, pixelsToMap = 1;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            module = await JS.InvokeAsync<IJSObjectReference>("import", "./js/map.js");
+        }
+    }
+
+    /// <summary>Goes back to the whole map. Called when a new set is loaded.</summary>
+    public void Reset()
+    {
+        scale = 1;
+        offsetX = 0;
+        offsetY = 0;
+    }
+
+    private IEnumerable<int> LabelIndexes()
+    {
+        // The hovered text goes last so its label is drawn on top.
+        var indexes = new List<int>();
+        if (Selected is int selected)
+        {
+            indexes.Add(selected);
+        }
+
+        indexes.AddRange(Linked);
+        if (hovered is int over)
+        {
+            indexes.Remove(over);
+            indexes.Add(over);
+        }
+
+        return indexes.Distinct();
+    }
+
+    private async Task Click(int index)
+    {
+        // A drag that starts on a point should not select it.
+        if (!moved)
+        {
+            await OnSelect.InvokeAsync(index);
+        }
+    }
+
+    private async Task OnWheel(WheelEventArgs e)
+    {
+        var (x, y) = await ToMap(e.ClientX, e.ClientY);
+        ZoomAt(x, y, e.DeltaY < 0 ? ZoomStep : 1 / ZoomStep);
+    }
+
+    // Zooms keeping the point under the mouse in the same place on screen.
+    private void ZoomAt(double x, double y, double factor)
+    {
+        var next = Math.Clamp(scale * factor, 0.5, 40);
+        offsetX = x - ((x - offsetX) * next / scale);
+        offsetY = y - ((y - offsetY) * next / scale);
+        scale = next;
+    }
+
+    private async Task OnPointerDown(PointerEventArgs e)
+    {
+        dragging = true;
+        moved = false;
+        lastX = e.ClientX;
+        lastY = e.ClientY;
+        var rect = await Rect();
+        pixelsToMap = rect is null || rect[2] == 0 ? 1 : Width / rect[2];
+    }
+
+    private void OnPointerMove(PointerEventArgs e)
+    {
+        if (!dragging)
+        {
+            return;
+        }
+
+        var dx = e.ClientX - lastX;
+        var dy = e.ClientY - lastY;
+        if (Math.Abs(dx) + Math.Abs(dy) > 0)
+        {
+            moved = moved || Math.Abs(dx) + Math.Abs(dy) > 3;
+            offsetX += dx * pixelsToMap;
+            offsetY += dy * pixelsToMap;
+            lastX = e.ClientX;
+            lastY = e.ClientY;
+        }
+    }
+
+    private void EndDrag() => dragging = false;
+
+    private async Task<(double X, double Y)> ToMap(double clientX, double clientY)
+    {
+        var rect = await Rect();
+        if (rect is null || rect[2] == 0)
+        {
+            return (Width / 2, Height / 2);
+        }
+
+        var ratio = Width / rect[2];
+        return ((clientX - rect[0]) * ratio, (clientY - rect[1]) * ratio);
+    }
+
+    private async Task<double[]?> Rect() =>
+        module is null ? null : await module.InvokeAsync<double[]>("rect", svg);
+
+    private static string F(double value) => value.ToString("0.###", CultureInfo.InvariantCulture);
+
+    public async ValueTask DisposeAsync()
+    {
+        if (module is not null)
+        {
+            await module.DisposeAsync();
+        }
+    }
+}
