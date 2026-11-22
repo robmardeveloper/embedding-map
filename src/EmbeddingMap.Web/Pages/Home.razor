@@ -74,7 +74,7 @@ else
                 <ol class="results">
                     @foreach (var match in ranked)
                     {
-                        <MatchRow Item="set.Items[match.Index]" Similarity="match.Similarity" Color="@ColorOf(match.Index)" />
+                        <MatchRow Item="set.Items[match.Index]" Similarity="match.Similarity" BarLength="Bar(match)" Color="@ColorOf(match.Index)" />
                     }
                 </ol>
             }
@@ -88,7 +88,7 @@ else
                 <ol class="results">
                     @foreach (var match in ranked.Take(NeighborCount))
                     {
-                        <MatchRow Item="set.Items[match.Index]" Similarity="match.Similarity" Color="@ColorOf(match.Index)"
+                        <MatchRow Item="set.Items[match.Index]" Similarity="match.Similarity" BarLength="Bar(match)" Color="@ColorOf(match.Index)"
                                   OnClick="() => Select(match.Index)" />
                     }
                 </ol>
@@ -99,7 +99,9 @@ else
             }
 
             <p class="panel-note">
-                Similarity goes from 0 to 1 and is computed on all @index.Dimensions numbers, not on the map.
+                Similarity goes from 0 to 1 and is computed on all @index.Dimensions numbers, not on the map. The bars
+                compare the results with each other: the closest text fills its bar and the least similar in the set
+                leaves it almost empty.
             </p>
         </aside>
     </div>
@@ -116,8 +118,8 @@ else
         <h3>How is similarity measured?</h3>
         <p>
             By the angle between two lists of numbers, known as cosine similarity. A value of 1 means they point the same
-            way. With this model even texts on unrelated topics usually score between 0.7 and 0.85, so the order of the
-            results tells you more than the number itself.
+            way. With this model even unrelated texts usually score above 0.7, and single words often above 0.85. What
+            matters is the order of the results and how far ahead the first ones are, not the number itself.
         </p>
         <h3>Why the map is only a sketch</h3>
         <p>
@@ -164,6 +166,7 @@ else
     private int? selected;
     private bool searching;
     private IReadOnlyList<Match> ranked = [];
+    private (double Weakest, double Strongest) barRange = (0, 1);
 
     protected override async Task OnInitializedAsync()
     {
@@ -208,6 +211,7 @@ else
     {
         selected = index;
         ranked = Neighbors.Rank(vectors, index);
+        barRange = BarScale.RangeOf(ranked);
     }
 
     private void StartSearch()
@@ -239,6 +243,8 @@ else
         var rank = ranked.ToList().FindIndex(match => match.Index == i);
         return 1 - (0.85 * rank / Math.Max(ranked.Count - 1, 1));
     }
+
+    private double Bar(Match match) => BarScale.Length(match.Similarity, barRange.Weakest, barRange.Strongest);
 
     private string ColorOf(int i) => ColorOfGroup(set!.Items[i].Group);
 

@@ -12,7 +12,7 @@
     {
         <span class="match-text"><span class="swatch" style="background: @Color"></span>@Item.Text</span>
     }
-    <span class="bar" title="Similarity @Value"><span style="width: @Width"></span></span>
+    <span class="bar" title="Similarity @Value. The bars compare the results with each other."><span style="width: @Width"></span></span>
     <span class="score">@Value</span>
 </li>
 
@@ -23,6 +23,10 @@
     [Parameter]
     public double Similarity { get; set; }
 
+    /// <summary>How much of the bar to fill, from 0 to 1. See <see cref="BarScale"/>.</summary>
+    [Parameter]
+    public double BarLength { get; set; }
+
     [Parameter, EditorRequired]
     public required string Color { get; set; }
 
@@ -31,5 +35,5 @@
 
     private string Value => Similarity.ToString("0.00", CultureInfo.InvariantCulture);
 
-    private string Width => Math.Clamp(Similarity, 0, 1).ToString("0.###%", CultureInfo.InvariantCulture);
+    private string Width => Math.Clamp(BarLength, 0, 1).ToString("0.###%", CultureInfo.InvariantCulture);
 }

@@ -38,8 +38,9 @@ Measured on these sets:
   reserva" share almost no words, yet their similarity is above 0.9.
 - **Clear topics separate well, close ones less so.** Of the five closest texts, 87% share the group in the mixed
   topics set. In the booking and .NET sets it is about half, because the groups overlap in meaning.
-- **The scores are compressed.** With this model even texts in different groups usually score between 0.7 and 0.85.
-  The order of the results says more than the number itself.
+- **The scores are squeezed together.** With this model even unrelated texts usually score above 0.7, and single
+  words often above 0.85. "doctor" and "médico" score 0.94, but "doctor" and "dog" still score 0.89. The order of the
+  results and the gap after the first ones say more than the number itself.
 
 ## How it works
 
@@ -60,6 +61,9 @@ Some decisions worth explaining:
 - **The map and the list use different numbers.** The map has to squeeze 384 numbers into two and keeps only part of
   the variation (between 11% and 19% depending on the set). The list of closest texts uses all 384. When they
   disagree, the list is right.
+- **The bars are relative, the numbers are not.** Bars from 0 to 1 would all look the same, since almost every score
+  falls between 0.7 and 0.95. So each bar stretches between the weakest and the strongest match for the selected
+  text, which makes a clear winner stand out. The number next to it is still the real similarity.
 - **PCA is written by hand, without a maths library.** The sets are small, so it works on the n×n matrix of products
   between texts and finds the two main directions by power iteration. A fixed starting vector keeps the map the same
   on every visit.
